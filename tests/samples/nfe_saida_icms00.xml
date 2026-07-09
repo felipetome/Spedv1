@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00">
+  <NFe>
+    <infNFe>
+      <ide>
+        <tpNF>1</tpNF>
+        <nNF>98765</nNF>
+        <dhEmi>2025-03-05T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CRT>3</CRT>
+      </emit>
+      <det nItem="1">
+        <prod>
+          <cProd>NFEPROD1</cProd>
+          <xProd>NF-e Produto Teste</xProd>
+          <NCM>01010101</NCM>
+          <CFOP>5102</CFOP>
+          <vProd>300.00</vProd>
+        </prod>
+        <imposto>
+          <ICMS>
+            <ICMS00>
+              <orig>0</orig>
+              <vICMS>54.00</vICMS>
+              <vICMSST>0.00</vICMSST>
+            </ICMS00>
+          </ICMS>
+          <IPI>
+            <IPITrib>
+              <vIPI>9.00</vIPI>
+            </IPITrib>
+          </IPI>
+          <PIS>
+            <PISAliq>
+              <CST>01</CST>
+              <vPIS>6.30</vPIS>
+            </PISAliq>
+          </PIS>
+          <COFINS>
+            <COFINSAliq>
+              <CST>01</CST>
+              <vCOFINS>27.00</vCOFINS>
+            </COFINSAliq>
+          </COFINS>
+        </imposto>
+      </det>
+    </infNFe>
+  </NFe>
+</nfeProc>
+

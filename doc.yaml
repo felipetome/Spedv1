@@ -1,0 +1,425 @@
+sped_extractor:
+  version: 1.1.0
+  language: pt-BR
+
+  runtime:
+    command: "PYTHONPATH=src python3 -m sped_extractor.main"
+    logging: { level: INFO, file: ./saidas/exec.log }
+
+  inputs:
+    search_paths:
+      - "./entradas/**/*.txt"
+      - "./entradas/**/*.TXT"
+      - "./entradas/**/*.xml"
+      - "./entradas/**/*.XML"
+      - "./speds/**/*.txt"
+      - "./speds/**/*.TXT"
+      - "./speds/**/*.xml"
+      - "./speds/**/*.XML"
+    encodings: ["utf-8", "iso-8859-1"]
+    # Ignorar inutilizadas/canceladas por default (mas registrá-las no log)
+    ignore_nfe_status:
+      cancelled: true
+      inutilized: true
+    # Tamanho máximo por arquivo (streaming ativado de qualquer modo)
+    max_file_mb: 250
+
+  pipeline:
+    - step: collect_files
+      description: Localiza arquivos elegíveis.
+    - step: detect_parser
+      description: Seleciona parser aplicável (TXT EFD ICMS/IPI, TXT EFD-Contrib, NF-e XML, NFS-e XML).
+    - step: parse
+      description: Converte documentos em registros de ITENS + DOC (capa).
+      options:
+        streaming: true
+        decimals: "strict_decimal" # usar Decimal, sem float
+    - step: enrich
+      description: Enriquecimento com cadastros e tabelas auxiliares (0200/0400, UF origem/destino, descrições CFOP).
+      sources:
+        efd_icms_ipi:
+          - "0200->(DESCR_ITEM,NCM)"
+          - "0400->(NAT_CC,CFOP_DESC opcional)"
+    - step: consolidate
+      description: Consolida itens por chaves fortes.
+      join_keys:
+        # ordem de preferência para “união” TXT↔XML
+        - chave_acesso
+        - [CNPJ_emit, CNPJ_dest, MODELO, SERIE, NUM_DOC, DATA_DOC]
+      numeric_merge: "sum_if_conflict"
+      boolean_merge: "or"
+      lineage:
+        keep: true  # manter por item: arquivo, página/linha ou xpath
+    - step: normalize
+      description: Tipagem, arredondamento (2 casas), timezone e datas.
+      timezone: "America/Fortaleza"
+      date_out: "YYYY-MM-DD"
+      money_scale: 2
+      null_policy:
+        numeric_zero_if_missing:
+          - PIS
+          - COFINS
+          - IPI
+          - ISS
+          - ICMS
+          - ICMS_Antec
+          - ICMS_ST
+          - ICMS_DIFAL
+          - ICMS_RET
+          - Outros_tributos
+        null_if_missing:
+          - NCM
+          - DESCRIPTION
+          - NBS
+          - Cod_Item
+          - NUM_DOC
+          - NUM_ITEM
+          - CFOP
+          - cclasstrib
+          - cclasstrib_source
+          - RegimeGeral
+    - step: validate
+      description: Valida contra schema (itens + doc).
+      on_error: "report_and_continue" # reporta no relatorio_qualidade
+    - step: export
+      outputs:
+        json:
+          file: "./saidas/itens_sped.json"
+          structure: array # lista de objetos (um por item)
+        csv:
+          file: "./saidas/itens_sped.csv"
+          delimiter: ";"
+          header: main.CSV_FIELDS
+        docs_json:
+          file: "./saidas/documentos_sped.json"
+          structure: array # info de capa por documento
+        quality:
+          file: "./saidas/relatorio_qualidade.json"
+          metrics:
+            - pct_itens_com_NCM
+            - pct_itens_com_PIS_COFINS
+            - pct_itens_com_ICMS_ST
+            - pct_itens_com_DIFAL
+            - possui_nfse
+            - pct_itens_com_chave_acesso
+            - pct_itens_com_origem
+            - pct_documentos_cancelados_ignorados
+            - duplicidade_por_chave_acesso
+
+  output_schema:
+    item:
+      required:
+        - OPERATION
+        - CLASSIFICATION
+        - NCM
+        - DESCRIPTION
+        - VALUE
+        - PIS
+        - COFINS
+        - IPI
+        - ISS
+        - ICMS
+        - Origem
+        - NBS
+        - Data_Mov
+        - Pis_Mono
+        - Cofins_Mono
+        - ICMS_Antec
+        - ICMS_ST
+        - ICMS_DIFAL
+        - ICMS_RET
+        - Outros_tributos
+        - Cod_Item
+        - NUM_DOC
+        - NUM_ITEM
+        - CFOP
+        - cclasstrib
+        - cclasstrib_source
+        - RegimeGeral
+      # Campos adicionais (não quebram compatibilidade) p/ cobertura total
+      optional:
+        - chave_acesso
+        - UF_emit
+        - UF_dest
+        - idDest      # 1=Interna,2=Interestadual,3=Exterior
+        - indFinal    # 0/1
+        - indPres     # presença do comprador
+        - modFrete
+        - vFCP
+        - vFCPST
+        - vFCPSTRet
+        - vFCPUFDest
+        - vICMSDeson
+        - motDesICMS
+        - cBenef
+        - cEAN
+        - cEANTrib
+        - CST_ICMS
+        - CSOSN
+        - CST_PIS
+        - CST_COFINS
+        - BC_ICMS
+        - ALIQ_ICMS
+        - BC_PIS
+        - ALIQ_PIS
+        - BC_COFINS
+        - ALIQ_COFINS
+        - source_file
+        - source_format
+        - source_locator # linha (TXT) ou xpath (XML)
+
+    documento:
+      # JSON opcional de capa do documento (útil para auditoria e cruzamentos)
+      fields:
+        - chave_acesso
+        - modelo
+        - serie
+        - NUM_DOC
+        - CNPJ_emit
+        - CNPJ_dest
+        - dhEmi
+        - status # normal/cancelada/inutilizada
+        - tpEmis # normal/contingência
+        - OPERATION
+        - RegimeGeral
+        - idDest
+        - indFinal
+        - indPres
+        - UF_emit
+        - UF_dest
+        - vNF
+        - vFrete
+        - vDesc
+        - vTotTrib
+
+  parsers:
+
+    efd_icms_ipi:
+      trigger: presença de "|C100|" e "|C170|"
+      registros:
+        C100:
+          map:
+            NUM_DOC: NUM_DOC
+            DT_DOC:  DT_DOC
+            DT_E_S:  DT_E_S
+            IND_OPER: IND_OPER
+            CNPJ_emit: CNPJ
+            CHV_NFE:  CHV_NFE # quando informado no SPED
+        C170:
+          item_fields:
+            NUM_ITEM: NUM_ITEM
+            Cod_Item: COD_ITEM
+            VALUE: VL_ITEM
+            CFOP: CFOP
+            ICMS: VL_ICMS
+            IPI: VL_IPI
+            PIS: VL_PIS
+            COFINS: VL_COFINS
+            BC_ICMS: VL_BC_ICMS
+            ALIQ_ICMS: ALIQ_ICMS
+            BC_PIS: VL_BC_PIS
+            ALIQ_PIS: ALIQ_PIS
+            BC_COFINS: VL_BC_COFINS
+            ALIQ_COFINS: ALIQ_COFINS
+          flags:
+            CST_ICMS: CST_ICMS
+            CSOSN: CSOSN
+            CST_PIS: CST_PIS
+            CST_COFINS: CST_COFINS
+        "0200":
+          enrich:
+            DESCRIPTION: DESCR_ITEM
+            NCM: COD_NCM
+        "0400":
+          optional: true
+          enrich:
+            CFOP_DESC: COD_NAT
+      derivations:
+        OPERATION: { from: C100.IND_OPER, map: {"0":"Entrada","1":"Saida"} }
+        Data_Mov: { prefer: C100.DT_E_S, fallback: C100.DT_DOC, to_date: true }
+        Origem: { from: "CST/CSOSN first digit if available", nullable: true }
+        CLASSIFICATION: { rule: "CFOP 1/2/3⇒Entrada; 5/6/7⇒Saida; senão Desconhecido" }
+        Pis_Mono: { from: CST_PIS, monofasico_codes: ["04","05","06","07"] }
+        Cofins_Mono:{ from: CST_COFINS, monofasico_codes: ["04","05","06","07"] }
+        cclasstrib: { value: null }
+        cclasstrib_source: { value: "none" }
+        RegimeGeral: { value: "Desconhecido" }
+        chave_acesso: { from: C100.CHV_NFE, fallback_match_xml: true }
+      advanced:
+        icms_extras:
+          ICMS_ST: "somar campos ST no item se existirem; senão 0"
+          ICMS_DIFAL: "preencher via cruzamento com NF-e XML/Bloco E310 quando possível"
+          ICMS_Antec: "ajustes E220/E250 vinculáveis; senão 0"
+          ICMS_RET: "ajustes específicos vinculáveis; senão 0"
+
+    efd_contrib:
+      trigger: presença de "|M100|" ou "|M200|" ou (|C100| e |C170|)
+      registros:
+        C100: {}
+        C170:
+          item_fields:
+            PIS: VL_PIS
+            COFINS: VL_COFINS
+          flags:
+            CST_PIS: CST_PIS
+            CST_COFINS: CST_COFINS
+      join_strategy:
+        by: [CNPJ_emit, MODELO, SERIE, NUM_DOC, DATA_DOC]
+        date_tz: "America/Fortaleza"
+      monofasico_rules:
+        Pis_Mono_codes: ["04","05","06","07"]
+        Cofins_Mono_codes: ["04","05","06","07"]
+
+    nfe_xml:
+      trigger: tags <NFe> ou <nfeProc>
+      xpath:
+        header:
+          chave_acesso: "normalize-space(//infNFe/@Id | //protNFe/infProt/chNFe)"
+          NUM_DOC: "normalize-space(//ide/nNF)"
+          tpNF:    "normalize-space(//ide/tpNF)"
+          dhEmi:   "normalize-space(//ide/dhEmi | //ide/dEmi)"
+          CRT:     "normalize-space(//emit/CRT)"
+          idDest:  "normalize-space(//ide/idDest)"
+          indFinal:"normalize-space(//ide/indFinal)"
+          indPres: "normalize-space(//ide/indPres)"
+          modFrete:"normalize-space(//transp/modFrete)"
+          UF_emit: "normalize-space(//emit/enderEmit/UF)"
+          UF_dest: "normalize-space(//dest/enderDest/UF)"
+          status:  "normalize-space(//protNFe/infProt/cStat)" # 100=autorizada, 135/155=cancelada...
+          tpEmis:  "normalize-space(//ide/tpEmis)"
+        items: "//det"
+        per_item:
+          NUM_ITEM:     "@nItem"
+          Cod_Item:     "normalize-space(prod/cProd)"
+          DESCRIPTION:  "normalize-space(prod/xProd)"
+          NCM:          "normalize-space(prod/NCM)"
+          VALUE:        "number(prod/vProd)"
+          CFOP:         "normalize-space(prod/CFOP)"
+          cEAN:         "normalize-space(prod/cEAN)"
+          cEANTrib:     "normalize-space(prod/cEANTrib)"
+          ICMS:         "sum(imposto/ICMS/*/vICMS)"
+          IPI:          "sum(imposto/IPI/*/vIPI)"
+          PIS:          "sum(imposto/PIS/*/vPIS)"
+          COFINS:       "sum(imposto/COFINS/*/vCOFINS)"
+          Origem:       "number(imposto/ICMS/*/orig)"
+          ICMS_ST:      "sum(imposto/ICMS/*/vICMSST)"
+          ICMS_DIFAL:   "sum(imposto/ICMSUFDest/vICMSUFDest)"
+          vFCPUFDest:   "sum(imposto/ICMSUFDest/vFCPUFDest)"
+          vFCP:         "sum(imposto/ICMS/*/vFCP)"
+          vFCPST:       "sum(imposto/ICMS/*/vFCPST)"
+          vFCPSTRet:    "sum(imposto/ICMS/*/vFCPSTRet)"
+          vICMSDeson:   "sum(imposto/ICMS/*/vICMSDeson)"
+          motDesICMS:   "normalize-space(imposto/ICMS/*/motDesICMS)"
+          cBenef:       "normalize-space(imposto/ICMS/*/cBenef)"
+          CST_ICMS:     "normalize-space(imposto/ICMS/*/CST)"
+          CSOSN:        "normalize-space(imposto/ICMS/*/CSOSN)"
+          CST_PIS:      "normalize-space(imposto/PIS/*/CST)"
+          CST_COFINS:   "normalize-space(imposto/COFINS/*/CST)"
+          BC_ICMS:      "sum(imposto/ICMS/*/vBC)"
+          ALIQ_ICMS:    "number(imposto/ICMS/*/pICMS)"
+          BC_PIS:       "sum(imposto/PIS/*/vBC)"
+          ALIQ_PIS:     "number(imposto/PIS/*/pPIS)"
+          BC_COFINS:    "sum(imposto/COFINS/*/vBC)"
+          ALIQ_COFINS:  "number(imposto/COFINS/*/pCOFINS)"
+          cclasstrib:   "normalize-space(imposto/*/cClassTrib)"
+      derivations:
+        OPERATION: { from: tpNF, map: {"0":"Entrada","1":"Saida"} }
+        Data_Mov:  { from: dhEmi, to_date: true }
+        CLASSIFICATION: { rule: "CFOP 1/2/3⇒Entrada; 5/6/7⇒Saida; senão Desconhecido" }
+        Pis_Mono:  { rule: "true se CST_PIS ∈ {04,05,06,07}" }
+        Cofins_Mono: { rule: "true se CST_COFINS ∈ {04,05,06,07}" }
+        cclasstrib_source: { rule: "xml-nfe se cclasstrib != '', senão none" }
+        RegimeGeral: { from: CRT, map: {"1":"SN","2":"SN-Excesso","3":"Regime Normal"} }
+        Outros_tributos: { rule: "vFCPUFDest quando >0; senão 0" }
+      filters:
+        drop_if_status_in: ["135","155"] # cancelada e cancelada fora do prazo
+      lineage:
+        source_file: true
+        source_locator: "xpath"
+
+    nfse_xml:
+      trigger: tags <CompNfse>, <Nfse>, //InfNfse, //NFeRps
+      variants:
+        abrassf_like:
+          ISS: "number(//Servico/Valores/ValorIss)"
+          NBS: "normalize-space(//CodigoNBS | //CodigoServico | //Servico/Codigo)"
+          DESCRIPTION: "normalize-space(//Servico/Discriminacao)"
+          NUM_DOC: "normalize-space(//Numero)"
+          Data_Mov: "normalize-space(//DataEmissao | //Competencia)"
+          UF_emit: "normalize-space(//Prestador/Endereco/UF)"
+          UF_dest: "normalize-space(//Tomador/Endereco/UF)"
+          issRetido: "normalize-space(//Servico/Valores/IssRetido)"
+        ginfes_like:
+          ISS: "number(//Valores/ValorISS)"
+          NBS: "normalize-space(//ItemListaServico | //CodigoServico)"
+        betha_like:
+          ISS: "number(//servico/valores/valorIss)"
+          NBS: "normalize-space(//servico/itemListaServico)"
+        nacional:
+          ISS: "number(//Servico/Valores/ValorIss)"
+          NBS: "normalize-space(//Servico/CodigoMunicipioNBS | //Servico/CodigoNBS)"
+      defaults:
+        CLASSIFICATION: "Serviço"
+        NCM: null
+        ICMS: 0
+        IPI: 0
+        PIS: 0
+        COFINS: 0
+        ICMS_ST: 0
+        ICMS_DIFAL: 0
+        ICMS_Antec: 0
+        ICMS_RET: 0
+        Origem: null
+        CFOP: null
+        Cod_Item: null
+        NUM_ITEM: null
+        cclasstrib: null
+        cclasstrib_source: "none"
+        RegimeGeral: "Desconhecido"
+        Pis_Mono: false
+        Cofins_Mono: false
+      lineage:
+        source_file: true
+        source_locator: "xpath"
+
+  testing:
+    framework: pytest
+    command: "python3 -m pytest"
+    fixtures:
+      - copiar amostras p/ `entradas/`
+      - isolar dados reais `speds/` durante testes
+      - limpar `saidas/` ao final
+    golden_tests:
+      - name: nfe_saida_icms00
+        input: "./tests/samples/nfe_saida_icms00.xml"
+        expect_json: "./tests/golden/nfe_saida_icms00.items.json"
+      - name: nfe_difal
+        input: "./tests/samples/nfe_difal.xml"
+        expect_json: "./tests/golden/nfe_difal.items.json"
+      - name: nfse_abrassf
+        input: "./tests/samples/nfse.xml"
+        expect_json: "./tests/golden/nfse.items.json"
+      - name: efd_icms_ipi_min
+        input: "./tests/samples/efd_icms_ipi.txt"
+        expect_json: "./tests/golden/efd_icms_ipi.items.json"
+    assertions:
+      - campos_minimos_itens: "NUM_DOC, NUM_ITEM, VALUE, CFOP, OPERATION, Data_Mov"
+      - flags_monofasico: "Pis_Mono/Cofins_Mono true quando CST ∈ {04,05,06,07}"
+      - regime_crt_map: "CRT 1→SN, 2→SN-Excesso, 3→Regime Normal"
+      - difal_fcp: "ICMS_DIFAL>0 e vFCPUFDest>0 para amostra DIFAL"
+      - nfse_iss_nbs: "ISS>0 e NBS preenchido para NFS-e"
+      - qualidade_relatorio: "gera relatorio_qualidade.json"
+      - csv_header: "confere header e separador ';'"
+
+  files_gerados:
+    - "./saidas/itens_sped.json"
+    - "./saidas/documentos_sped.json"
+    - "./saidas/itens_sped.csv"
+    - "./saidas/relatorio_qualidade.json"
+    - "./saidas/exec.log"
+
+  observacoes:
+    - Preferir chave de acesso para deduplicação e consolidação; senão use (CNPJ, modelo, série, número, data).
+    - Registrar documentos cancelados/inutilizados em métricas, mas não gerar itens.
+    - Usar Decimal para todos os valores monetários; evitar float.
+    - Registrar, por item, o “source_locator” (linha do TXT ou XPath do XML) p/ auditoria.

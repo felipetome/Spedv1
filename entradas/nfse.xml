@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse>
+  <Nfse>
+    <InfNfse>
+      <Numero>7777</Numero>
+      <DataEmissao>2025-03-07T09:00:00-03:00</DataEmissao>
+      <Servico>
+        <CodigoNBS>1.05</CodigoNBS>
+        <Discriminacao>Serviço de consultoria</Discriminacao>
+        <Valores>
+          <ValorIss>500.00</ValorIss>
+        </Valores>
+      </Servico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>
+

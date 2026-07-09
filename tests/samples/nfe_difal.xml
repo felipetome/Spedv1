@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NFe>
+  <infNFe>
+    <ide>
+      <tpNF>1</tpNF>
+      <nNF>99999</nNF>
+      <dhEmi>2025-03-06T11:30:00-03:00</dhEmi>
+    </ide>
+    <emit>
+      <CRT>1</CRT>
+    </emit>
+    <det nItem="1">
+      <prod>
+        <cProd>NFEDIFAL</cProd>
+        <xProd>Produto DIFAL</xProd>
+        <NCM>02020202</NCM>
+        <CFOP>6108</CFOP>
+        <vProd>150.00</vProd>
+      </prod>
+      <imposto>
+        <ICMS>
+          <ICMS10>
+            <orig>1</orig>
+            <vICMS>18.00</vICMS>
+            <vICMSST>5.00</vICMSST>
+          </ICMS10>
+        </ICMS>
+        <ICMSUFDest>
+          <vICMSUFDest>3.75</vICMSUFDest>
+          <vFCPUFDest>1.25</vFCPUFDest>
+        </ICMSUFDest>
+        <PIS>
+          <PISAliq>
+            <CST>04</CST>
+            <vPIS>0.00</vPIS>
+          </PISAliq>
+        </PIS>
+        <COFINS>
+          <COFINSAliq>
+            <CST>04</CST>
+            <vCOFINS>0.00</vCOFINS>
+          </COFINSAliq>
+        </COFINS>
+      </imposto>
+    </det>
+  </infNFe>
+</NFe>
+

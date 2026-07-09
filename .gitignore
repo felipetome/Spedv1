@@ -1,0 +1,23 @@
+# ===== Ambiente Python =====
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# ===== Dados fiscais reais e saídas geradas (NÃO versionar) =====
+saidas/
+speds/
+# inclui ex4.csv e CSVs de saída — dados fiscais fora do repo
+*.csv
+
+# ===== Sistema operacional / editores =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
